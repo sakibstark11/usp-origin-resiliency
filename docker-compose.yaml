@@ -1,0 +1,83 @@
+version: "2.1"
+
+services:
+  live-streaming-origin-1:
+    image: docker.io/unifiedstreaming/live-streaming-origin:stable
+    networks:
+      static-network:
+        ipv4_address: 172.20.128.3
+    environment:
+      - LOG_LEVEL=warn
+      - UspLicenseKey
+      - PUB_POINT_NAME=channel
+      - PUB_POINT_OPTS=--archiving=1 --archive_length=120 --archive_segment_length=6 --dvr_window_length=60 --restart_on_encoder_reconnect --hls.minimum_fragment_length=48/25 --hls.client_manifest_version=4 --hls.no_audio_only --mpd.minimum_fragment_length=48/25 --mpd.segment_template=time
+    healthcheck:
+      test: kill -0 1
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  live-streaming-ffmpeg-1:
+    image: docker.io/unifiedstreaming/live-streaming-ffmpeg:stable
+    environment:
+      - PUB_POINT_URI=http://172.20.128.3/channel/channel.isml
+      - 'TRACKS={ "video": [ { "width": 1280, "height": 720, "bitrate": "300k", "codec": "libx264", "framerate": 25, "gop": 48, "timescale": 25 } ], "audio": [ { "samplerate": 48000, "bitrate": "64k", "codec": "aac", "language": "eng", "timescale": 48000, "frag_duration_micros": 1920000 } ] }'
+    depends_on:
+      live-streaming-origin-1:
+        condition: service_healthy
+    restart: always
+
+    networks:
+      static-network:
+        ipv4_address: 172.20.128.5
+
+
+  live-streaming-origin-2:
+    image: docker.io/unifiedstreaming/live-streaming-origin:stable
+    environment:
+      - LOG_LEVEL=warn
+      - UspLicenseKey
+      - PUB_POINT_NAME=channel
+      - PUB_POINT_OPTS=--archiving=1 --archive_length=120 --archive_segment_length=6 --dvr_window_length=60 --restart_on_encoder_reconnect --hls.minimum_fragment_length=48/25 --hls.client_manifest_version=4 --hls.no_audio_only --mpd.minimum_fragment_length=48/25 --mpd.segment_template=time
+    healthcheck:
+      test: kill -0 1
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    networks:
+      static-network:
+        ipv4_address: 172.20.128.2
+
+  live-streaming-ffmpeg-2:
+    image: docker.io/unifiedstreaming/live-streaming-ffmpeg:stable
+    environment:
+      - PUB_POINT_URI=http://172.20.128.2/channel/channel.isml
+      - 'TRACKS={ "video": [ { "width": 1280, "height": 720, "bitrate": "300k", "codec": "libx264", "framerate": 25, "gop": 48, "timescale": 25 } ], "audio": [ { "samplerate": 48000, "bitrate": "64k", "codec": "aac", "language": "eng", "timescale": 48000, "frag_duration_micros": 1920000 } ] }'
+    depends_on:
+      live-streaming-origin-2:
+        condition: service_healthy
+    restart: always
+
+    networks:
+      static-network:
+        ipv4_address: 172.20.128.4
+
+  nginx:
+    image: nginx:1
+    hostname: origin
+    domainname: origin.sakib
+    platform: linux/amd64
+    ports:
+      - 80:80
+      - 443:443
+    volumes:
+      - ./origin.conf:/etc/nginx/conf.d/origin.conf
+    networks:
+      static-network:
+        ipv4_address: 172.20.128.1
+
+networks:
+  static-network:
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

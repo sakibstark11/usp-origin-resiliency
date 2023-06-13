@@ -4,13 +4,14 @@ services:
   live-streaming-origin-1:
     image: docker.io/unifiedstreaming/live-streaming-origin:stable
     networks:
-      static-network:
-        ipv4_address: 172.20.128.3
+      docker-network:
+        aliases:
+          - "origin-1"
     environment:
       - LOG_LEVEL=warn
       - UspLicenseKey
       - PUB_POINT_NAME=channel
-      - PUB_POINT_OPTS=--archiving=1  --archive_length=180 --archive_segment_length=5 --dvr_window_length=60 --restart_on_encoder_reconnect --hls.minimum_fragment_length=48/25 --hls.client_manifest_version=4 --hls.no_audio_only --mpd.minimum_fragment_length=48/25 --mpd.segment_template=time
+      - PUB_POINT_OPTS=--archiving=1 --archive_length=180 --archive_segment_length=5 --dvr_window_length=60 --restart_on_encoder_reconnect --hls.minimum_fragment_length=48/25 --hls.client_manifest_version=4 --hls.no_audio_only --mpd.minimum_fragment_length=48/25 --mpd.segment_template=time
     healthcheck:
       test: kill -0 1
       interval: 2s
@@ -20,7 +21,7 @@ services:
   live-streaming-ffmpeg-1:
     image: docker.io/unifiedstreaming/live-streaming-ffmpeg:stable
     environment:
-      - PUB_POINT_URI=http://172.20.128.3/channel/channel.isml
+      - PUB_POINT_URI=http://origin-1/channel/channel.isml
       - 'TRACKS={ "video": [ { "width": 1280, "height": 720, "bitrate": "300k", "codec": "libx264", "framerate": 25, "gop": 48, "timescale": 25 } ], "audio": [ { "samplerate": 48000, "bitrate": "64k", "codec": "aac", "language": "eng", "timescale": 48000, "frag_duration_micros": 1920000 } ] }'
     depends_on:
       live-streaming-origin-1:
@@ -28,8 +29,7 @@ services:
     restart: always
 
     networks:
-      static-network:
-        ipv4_address: 172.20.128.5
+      docker-network:
 
 
   live-streaming-origin-2:
@@ -38,20 +38,21 @@ services:
       - LOG_LEVEL=warn
       - UspLicenseKey
       - PUB_POINT_NAME=channel
-      - PUB_POINT_OPTS=--archiving=1  --archive_length=180 --archive_segment_length=600 --dvr_window_length=1800 --restart_on_encoder_reconnect --hls.minimum_fragment_length=48/25 --hls.client_manifest_version=4 --hls.no_audio_only --mpd.minimum_fragment_length=48/25 --mpd.segment_template=time
+      - PUB_POINT_OPTS=--archiving=1 --archive_length=180 --archive_segment_length=5 --dvr_window_length=60 --restart_on_encoder_reconnect --hls.minimum_fragment_length=48/25 --hls.client_manifest_version=4 --hls.no_audio_only --mpd.minimum_fragment_length=48/25 --mpd.segment_template=time
     healthcheck:
       test: kill -0 1
       interval: 2s
       timeout: 5s
       retries: 30
     networks:
-      static-network:
-        ipv4_address: 172.20.128.2
+      docker-network:
+        aliases:
+          - "origin-2"
 
   live-streaming-ffmpeg-2:
     image: docker.io/unifiedstreaming/live-streaming-ffmpeg:stable
     environment:
-      - PUB_POINT_URI=http://172.20.128.2/channel/channel.isml
+      - PUB_POINT_URI=http://origin-2/channel/channel.isml
       - 'TRACKS={ "video": [ { "width": 1280, "height": 720, "bitrate": "300k", "codec": "libx264", "framerate": 25, "gop": 48, "timescale": 25 } ], "audio": [ { "samplerate": 48000, "bitrate": "64k", "codec": "aac", "language": "eng", "timescale": 48000, "frag_duration_micros": 1920000 } ] }'
     depends_on:
       live-streaming-origin-2:
@@ -59,25 +60,20 @@ services:
     restart: always
 
     networks:
-      static-network:
-        ipv4_address: 172.20.128.4
+      docker-network:
 
   nginx:
     image: nginx:1
-    hostname: origin
-    domainname: origin.sakib
     platform: linux/amd64
+    domainname: origin.test
     ports:
       - 80:80
       - 443:443
     volumes:
       - ./origin.conf:/etc/nginx/conf.d/origin.conf
     networks:
-      static-network:
-        ipv4_address: 172.20.128.1
-
+      docker-network:
+        aliases:
+          - origin.test
 networks:
-  static-network:
-    ipam:
-      config:
-        - subnet: 172.20.0.0/16
+  docker-network:

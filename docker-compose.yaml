@@ -1,79 +1,117 @@
-version: "2.1"
-
 services:
-  live-streaming-origin-1:
-    image: docker.io/unifiedstreaming/live-streaming-origin:stable
-    networks:
-      docker-network:
-        aliases:
-          - "origin-1"
+  contribution:
+    image: jrottenberg/ffmpeg:7.1-alpine
+    command:
+      [
+        "-re",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc=size=640X480:rate=25",
+        "-f",
+        "lavfi",
+        "-i",
+        "sine=frequency=1000:sample_rate=48000",
+        "-map",
+        "0:v:0",
+        "-map",
+        "1:a:0",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-g",
+        "50",
+        "-keyint_min",
+        "50",
+        "-sc_threshold",
+        "0",
+        "-c:a",
+        "aac",
+        "-f",
+        "tee",
+        "[f=mpegts:onfail=ignore]udp://encoder-a:1234?pkt_size=1316|[f=mpegts:onfail=ignore]udp://encoder-b:1234?pkt_size=1316",
+      ]
+    restart: unless-stopped
+    depends_on: [encoder-a, encoder-b]
+
+  encoder-a:
+    image: jrottenberg/ffmpeg:7.1-alpine
+    entrypoint: ["sh"]
     environment:
-      - LOG_LEVEL=warn
-      - UspLicenseKey
-      - PUB_POINT_NAME=channel
-      - PUB_POINT_OPTS=--archiving=1 --archive_length=180 --archive_segment_length=5 --dvr_window_length=60 --restart_on_encoder_reconnect --hls.minimum_fragment_length=48/25 --hls.client_manifest_version=4 --hls.no_audio_only --mpd.minimum_fragment_length=48/25 --mpd.segment_template=time
-    healthcheck:
-      test: kill -0 1
-      interval: 2s
-      timeout: 5s
-      retries: 30
+      - TZ=UTC
+    command:
+      - -c
+      - |
+        rm -f /out/*.m4s /out/*.mp4 /out/*.m3u8
+        exec ffmpeg -y \
+          -use_wallclock_as_timestamps 1 \
+          -i "udp://0.0.0.0:1234?overrun_nonfatal=1&fifo_size=5000000" \
+          -map 0:v:0 -map 0:a:0 \
+          -vf "drawtext=fontfile=/usr/share/fonts/dejavu/DejaVuSans.ttf:text='ENCODER A / PRIMARY UTC %{localtime\:%Y-%m-%d_%H-%M-%S}':x=24:y=24:fontsize=24:fontcolor=white:box=1:boxcolor=black@0.70:boxborderw=12" \
+          -force_key_frames source \
+          -c:v libx264 -preset veryfast -b:v 2500k -r 25 -g 50 -keyint_min 50 -sc_threshold 0 \
+          -c:a aac -b:a 128k \
+          -f hls -hls_time 2 -hls_list_size 8 -hls_delete_threshold 2 \
+          -hls_segment_type fmp4 -hls_fmp4_init_filename init.mp4 \
+          -strftime 1 \
+          -hls_flags independent_segments+temp_file+delete_segments+program_date_time \
+          -hls_segment_filename "/out/seg-%Y%m%dT%H%M%SZ.m4s" \
+          /out/live.m3u8
+    volumes: [origin-a:/out]
+    restart: unless-stopped
 
-  live-streaming-ffmpeg-1:
-    image: docker.io/unifiedstreaming/live-streaming-ffmpeg:stable
+  encoder-b:
+    image: jrottenberg/ffmpeg:7.1-alpine
+    entrypoint: ["sh"]
     environment:
-      - PUB_POINT_URI=http://origin-1/channel/channel.isml
-      - 'TRACKS={ "video": [ { "width": 1280, "height": 720, "bitrate": "300k", "codec": "libx264", "framerate": 25, "gop": 48, "timescale": 25 } ], "audio": [ { "samplerate": 48000, "bitrate": "64k", "codec": "aac", "language": "eng", "timescale": 48000, "frag_duration_micros": 1920000 } ] }'
-    depends_on:
-      live-streaming-origin-1:
-        condition: service_healthy
-    restart: always
+      - TZ=UTC
+    command:
+      - -c
+      - |
+        rm -f /out/*.m4s /out/*.mp4 /out/*.m3u8
+        exec ffmpeg -y \
+          -use_wallclock_as_timestamps 1 \
+          -i "udp://0.0.0.0:1234?overrun_nonfatal=1&fifo_size=5000000" \
+          -map 0:v:0 -map 0:a:0 \
+          -vf "drawtext=fontfile=/usr/share/fonts/dejavu/DejaVuSans.ttf:text='ENCODER B / BACKUP UTC %{localtime\:%Y-%m-%d_%H-%M-%S}':x=24:y=24:fontsize=24:fontcolor=white:box=1:boxcolor=black@0.70:boxborderw=12" \
+          -force_key_frames source \
+          -c:v libx264 -preset veryfast -b:v 2500k -r 25 -g 50 -keyint_min 50 -sc_threshold 0 \
+          -c:a aac -b:a 128k \
+          -f hls -hls_time 2 -hls_list_size 8 -hls_delete_threshold 2 \
+          -hls_segment_type fmp4 -hls_fmp4_init_filename init.mp4 \
+          -strftime 1 \
+          -hls_flags independent_segments+temp_file+delete_segments+program_date_time \
+          -hls_segment_filename "/out/seg-%Y%m%dT%H%M%SZ.m4s" \
+          /out/live.m3u8
+    volumes: [origin-b:/out]
+    restart: unless-stopped
 
-    networks:
-      docker-network:
-
-
-  live-streaming-origin-2:
-    image: docker.io/unifiedstreaming/live-streaming-origin:stable
-    environment:
-      - LOG_LEVEL=warn
-      - UspLicenseKey
-      - PUB_POINT_NAME=channel
-      - PUB_POINT_OPTS=--archiving=1 --archive_length=180 --archive_segment_length=5 --dvr_window_length=60 --restart_on_encoder_reconnect --hls.minimum_fragment_length=48/25 --hls.client_manifest_version=4 --hls.no_audio_only --mpd.minimum_fragment_length=48/25 --mpd.segment_template=time
-    healthcheck:
-      test: kill -0 1
-      interval: 2s
-      timeout: 5s
-      retries: 30
-    networks:
-      docker-network:
-        aliases:
-          - "origin-2"
-
-  live-streaming-ffmpeg-2:
-    image: docker.io/unifiedstreaming/live-streaming-ffmpeg:stable
-    environment:
-      - PUB_POINT_URI=http://origin-2/channel/channel.isml
-      - 'TRACKS={ "video": [ { "width": 1280, "height": 720, "bitrate": "300k", "codec": "libx264", "framerate": 25, "gop": 48, "timescale": 25 } ], "audio": [ { "samplerate": 48000, "bitrate": "64k", "codec": "aac", "language": "eng", "timescale": 48000, "frag_duration_micros": 1920000 } ] }'
-    depends_on:
-      live-streaming-origin-2:
-        condition: service_healthy
-    restart: always
-
-    networks:
-      docker-network:
-
-  nginx:
-    image: nginx:1
-    platform: linux/amd64
-    domainname: origin.test
-    ports:
-      - 80:80
-      - 443:443
+  nginx-a:
+    image: openresty/openresty:alpine
     volumes:
-      - ./origin.conf:/etc/nginx/conf.d/origin.conf
-    networks:
-      docker-network:
-        aliases:
-          - origin.test
-networks:
-  docker-network:
+      - ./nginx-sub.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
+      - origin-a:/usr/local/openresty/nginx/html:ro
+    depends_on: [encoder-a]
+    restart: unless-stopped
+
+  nginx-b:
+    image: openresty/openresty:alpine
+    volumes:
+      - ./nginx-sub.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
+      - origin-b:/usr/local/openresty/nginx/html:ro
+    depends_on: [encoder-b]
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: ./gateway
+    ports: ["8080:80"]
+    volumes:
+      - ./web:/usr/local/openresty/nginx/html:ro
+    depends_on: [nginx-a, nginx-b]
+    restart: unless-stopped
+
+volumes:
+  origin-a:
+  origin-b:

@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>CMAF Resiliency Lab</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: system-ui, sans-serif;
+        background: #0d1117;
+        color: #e6edf3;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 1.5rem;
+      }
+
+      h1 {
+        margin: 0 0 .25rem;
+        font-size: 1.4rem;
+      }
+
+      h2 {
+        margin: 0 0 .5rem;
+        font-size: .95rem;
+        text-transform: uppercase;
+        letter-spacing: .08em;
+        color: #8b949e;
+      }
+
+      section {
+        margin-bottom: 1.5rem;
+      }
+
+      /* Player */
+      video {
+        width: 100%;
+        background: #000;
+        aspect-ratio: 16/9;
+        display: block;
+        border-radius: 6px;
+      }
+
+      /* Button groups */
+      .btn-group {
+        display: flex;
+        gap: .5rem;
+        flex-wrap: wrap;
+        margin-top: .75rem;
+      }
+
+      button {
+        padding: .4rem .9rem;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        background: #161b22;
+        color: #e6edf3;
+        cursor: pointer;
+        font-size: .875rem;
+        transition: background .15s;
+      }
+
+      button:hover {
+        background: #21262d;
+      }
+
+      button.active {
+        background: #1f6feb;
+        border-color: #388bfd;
+        color: #fff;
+      }
+
+      button.a-btn.active {
+        background: #1a7f37;
+        border-color: #2ea043;
+      }
+
+      button.b-btn.active {
+        background: #9a3e00;
+        border-color: #f0883e;
+      }
+
+      button.auto-btn.active {
+        background: #6e40c9;
+        border-color: #a371f7;
+      }
+
+      /* Status bar */
+      .status {
+        font-size: .85rem;
+        margin-top: .5rem;
+        min-height: 1.25rem;
+      }
+
+      .ok {
+        color: #3fb950;
+      }
+
+      .bad {
+        color: #f85149;
+      }
+
+      .info {
+        color: #58a6ff;
+      }
+
+      /* Side-by-side manifests */
+      .manifests {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+      }
+
+      @media (max-width: 700px) {
+        .manifests {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .manifest-box {
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        overflow: hidden;
+      }
+
+      .manifest-box header {
+        padding: .4rem .75rem;
+        font-size: .8rem;
+        font-weight: 600;
+        border-bottom: 1px solid #30363d;
+        display: flex;
+        align-items: center;
+        gap: .5rem;
+      }
+
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #8b949e;
+        flex-shrink: 0;
+      }
+
+      .dot.live {
+        background: #3fb950;
+      }
+
+      .dot.stale {
+        background: #f85149;
+      }
+
+      pre {
+        margin: 0;
+        padding: .75rem;
+        font-size: .75rem;
+        overflow: auto;
+        max-height: 14rem;
+        color: #8b949e;
+      }
+
+      /* Divider */
+      hr {
+        border: none;
+        border-top: 1px solid #21262d;
+        margin: 1rem 0;
+      }
+    </style>
+  </head>
+
+  <body>
+    <h1>CMAF Resiliency Lab</h1>
+    <p style="color:#8b949e;margin:.25rem 0 1.25rem">Gateway on-demand failover — powered by Lua+Nginx</p>
+
+    <!-- Player -->
+    <section>
+      <h2>Player</h2>
+      <video id="video" controls autoplay muted playsinline></video>
+      <div class="btn-group">
+        <button id="btn-live" class="active" onclick="setStream('live')">🔴 Live (auto)</button>
+        <button id="btn-a" class="a-btn" onclick="setStream('a')">Origin A</button>
+        <button id="btn-b" class="b-btn" onclick="setStream('b')">Origin B</button>
+      </div>
+      <div class="status" id="player-status"></div>
+    </section>
+
+    <hr>
+
+    <!-- Override control -->
+    <section>
+      <h2>Override — what does "Live" resolve to?</h2>
+      <p style="color:#8b949e;font-size:.85rem;margin:.25rem 0 .75rem">
+        These buttons call <code style="color:#58a6ff">/switch?origin=…</code> on the gateway.
+        Changing this does <em>not</em> change which stream the player is currently showing —
+        click <strong>Live</strong> above to pick it up.
+      </p>
+      <div class="btn-group">
+        <button id="sw-auto" class="auto-btn" onclick="setOverride('clear')">Auto (health-check)</button>
+        <button id="sw-a" class="a-btn" onclick="setOverride('a')">Force A</button>
+        <button id="sw-b" class="b-btn" onclick="setOverride('b')">Force B</button>
+      </div>
+      <div class="status" id="switch-status"></div>
+    </section>
+
+    <hr>
+
+    <!-- Manifests side by side -->
+    <section>
+      <h2>Live manifests</h2>
+      <div class="manifests">
+        <div class="manifest-box">
+          <header><span class="dot" id="dot-a"></span> Origin A — <code>/a/live.m3u8</code></header>
+          <pre id="pre-a">Loading…</pre>
+        </div>
+        <div class="manifest-box">
+          <header><span class="dot" id="dot-b"></span> Origin B — <code>/b/live.m3u8</code></header>
+          <pre id="pre-b">Loading…</pre>
+        </div>
+      </div>
+    </section>
+
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
+    <script>
+      const STREAMS = {
+        live: '/live/live.m3u8',
+        a: '/a/live.m3u8',
+        b: '/b/live.m3u8',
+      };
+
+      let currentStream = 'live';
+      let hls;
+      const video = document.getElementById('video');
+      const playerStatus = document.getElementById('player-status');
+      const switchStatus = document.getElementById('switch-status');
+
+      // ── Player ────────────────────────────────────────────────────────────────
+      function setStream(key) {
+        currentStream = key;
+        // Update active button
+        ['live', 'a', 'b'].forEach(k => document.getElementById('btn-' + k).classList.toggle('active', k === key));
+        playStream(STREAMS[key]);
+      }
+
+      function playStream(url) {
+        if (hls) { hls.destroy(); hls = null; }
+        if (Hls.isSupported()) {
+          hls = new Hls({ lowLatencyMode: false, backBufferLength: 30 });
+          hls.loadSource(url);
+          hls.attachMedia(video);
+          hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => { }));
+          hls.on(Hls.Events.ERROR, (_, d) => {
+            if (d.fatal) {
+              playerStatus.textContent = `Error: ${d.details}`;
+              playerStatus.className = 'status bad';
+            }
+          });
+          playerStatus.textContent = `Playing ${url}`;
+          playerStatus.className = 'status info';
+        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+          video.src = url;
+          video.play().catch(() => { });
+          playerStatus.textContent = `Native HLS: ${url}`;
+          playerStatus.className = 'status info';
+        } else {
+          playerStatus.textContent = 'Browser lacks HLS support';
+          playerStatus.className = 'status bad';
+        }
+      }
+
+      // ── Override ──────────────────────────────────────────────────────────────
+      const SW_LABELS = { clear: 'Auto', a: 'A', b: 'B' };
+      let currentOverride = 'clear';
+
+      async function setOverride(target) {
+        try {
+          await fetch(`/switch?origin=${target}`, { cache: 'no-store' });
+          currentOverride = target;
+          ['auto', 'a', 'b'].forEach(k => {
+            const mapKey = k === 'auto' ? 'clear' : k;
+            document.getElementById('sw-' + k).classList.toggle('active', mapKey === target);
+          });
+          switchStatus.textContent = target === 'clear'
+            ? 'Live now uses automatic health-check'
+            : `Live is forced to origin ${target.toUpperCase()}`;
+          switchStatus.className = 'status ok';
+        } catch (e) {
+          switchStatus.textContent = `Switch failed: ${e.message}`;
+          switchStatus.className = 'status bad';
+        }
+      }
+
+      // ── Manifest inspector ────────────────────────────────────────────────────
+      async function fetchManifest(url, preEl, dotEl) {
+        try {
+          const r = await fetch(`${url}?t=${Date.now()}`, { cache: 'no-store' });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const text = await r.text();
+          preEl.textContent = text;
+          dotEl.className = 'dot live';
+        } catch (e) {
+          preEl.textContent = `Unavailable: ${e.message}`;
+          dotEl.className = 'dot stale';
+        }
+      }
+
+      function pollManifests() {
+        fetchManifest('/a/live.m3u8', document.getElementById('pre-a'), document.getElementById('dot-a'));
+        fetchManifest('/b/live.m3u8', document.getElementById('pre-b'), document.getElementById('dot-b'));
+      }
+
+      // ── Init ──────────────────────────────────────────────────────────────────
+      document.getElementById('sw-auto').classList.add('active');
+      setStream('live');
+      // pollManifests();
+      // setInterval(pollManifests, 3000);
+    </script>
+  </body>
+
+</html>

@@ -36,77 +36,16 @@ services:
     depends_on: [encoder-a, encoder-b]
 
   encoder-a:
-    image: jrottenberg/ffmpeg:7.1-alpine
-    entrypoint: ["sh", "-c"]
+    build: ./encoder
     environment:
       - TZ=UTC
-    command:
-      - |
-        # Mathematical sequence calculation: Current Epoch / hls_time (2 seconds)
-        rm -f /out/*.m4s /out/*.mp4 /out/*.m3u8
-        START_NUM=$$(( $(date +%s) / 2 ))
-
-        exec ffmpeg -y \
-          -use_wallclock_as_timestamps 1 \
-          -i "udp://0.0.0.0:1234?overrun_nonfatal=1&fifo_size=5000000" \
-          -map 0:v:0 -map 0:a:0 \
-          -vf "drawtext=fontfile=/usr/share/fonts/dejavu/DejaVuSans.ttf:text='ENCODER A / PRIMARY UTC %{localtime\:%Y-%m-%d_%H-%M-%S}':x=24:y=24:fontsize=24:fontcolor=white:box=1:boxcolor=black@0.70:boxborderw=12" \
-          -force_key_frames "expr:gte(t,n_forced*2)" \
-          -c:v libx264 -preset veryfast -b:v 2500k -r 25 -g 50 -keyint_min 50 -sc_threshold 0 \
-          -c:a aac -b:a 128k \
-          -f hls -hls_time 2 -hls_list_size 8 -hls_delete_threshold 2 \
-          -hls_segment_type fmp4 -hls_fmp4_init_filename init.mp4 \
-          -strftime 1 \
-          -start_number $$START_NUM \
-          -hls_flags independent_segments+temp_file+delete_segments+program_date_time+omit_endlist \
-          -hls_segment_filename "/out/seg-%Y%m%dT%H%M%SZ.m4s" \
-          /out/live.m3u8
-    volumes: [origin-a:/out]
+      - TEXT=ENCODER A
     restart: unless-stopped
-
   encoder-b:
-    image: jrottenberg/ffmpeg:7.1-alpine
-    entrypoint: ["sh", "-c"]
+    build: ./encoder
     environment:
       - TZ=UTC
-    command:
-      - |
-        # Mathematical sequence calculation: Current Epoch / hls_time (2 seconds)
-        rm -f /out/*.m4s /out/*.mp4 /out/*.m3u8
-        START_NUM=$$(( $(date +%s) / 2 ))
-
-        exec ffmpeg -y \
-          -use_wallclock_as_timestamps 1 \
-          -i "udp://0.0.0.0:1234?overrun_nonfatal=1&fifo_size=5000000" \
-          -map 0:v:0 -map 0:a:0 \
-          -vf "drawtext=fontfile=/usr/share/fonts/dejavu/DejaVuSans.ttf:text='ENCODER B / BACKUP UTC %{localtime\:%Y-%m-%d_%H-%M-%S}':x=24:y=24:fontsize=24:fontcolor=white:box=1:boxcolor=black@0.70:boxborderw=12" \
-          -force_key_frames "expr:gte(t,n_forced*2)" \
-          -c:v libx264 -preset veryfast -b:v 2500k -r 25 -g 50 -keyint_min 50 -sc_threshold 0 \
-          -c:a aac -b:a 128k \
-          -f hls -hls_time 2 -hls_list_size 8 -hls_delete_threshold 2 \
-          -hls_segment_type fmp4 -hls_fmp4_init_filename init.mp4 \
-          -strftime 1 \
-          -start_number $$START_NUM \
-          -hls_flags independent_segments+temp_file+delete_segments+program_date_time+omit_endlist \
-          -hls_segment_filename "/out/seg-%Y%m%dT%H%M%SZ.m4s" \
-          /out/live.m3u8
-    volumes: [origin-b:/out]
-    restart: unless-stopped
-
-  nginx-a:
-    image: openresty/openresty:alpine
-    volumes:
-      - ./nginx-sub.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
-      - origin-a:/usr/local/openresty/nginx/html:ro
-    depends_on: [encoder-a]
-    restart: unless-stopped
-
-  nginx-b:
-    image: openresty/openresty:alpine
-    volumes:
-      - ./nginx-sub.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
-      - origin-b:/usr/local/openresty/nginx/html:ro
-    depends_on: [encoder-b]
+      - TEXT=ENCODER B
     restart: unless-stopped
 
   gateway:
@@ -115,7 +54,7 @@ services:
     ports: ["8080:80"]
     volumes:
       - ./web:/usr/local/openresty/nginx/html:ro
-    depends_on: [nginx-a, nginx-b]
+    depends_on: [encoder-a, encoder-b]
     restart: unless-stopped
 
 volumes:
